@@ -6,7 +6,7 @@ Hello Team! 👋
 
 📄 **Read Documentation**: Familiarise yourself with the workings of each tool in the readme's. 
 
-💡 **Need a new package?** Go ahead!
+💡 **Need a new package?** Go ahead to create it!
 
 🔧 **See room for improvement?**
   - Make a new branch
