@@ -6,7 +6,7 @@ Hello Team! 👋
 
 📄 **Read Documentation**: Familiarise yourself with the workings of each tool in the readme's. 
 
-💡 **Need a new package?**: Go ahead! Please adhere to our [conventions](https://www.notion.so/muteskin/Code-conventions-d3c8aa709eb5458a8d128eb9a5ae321b), see below.
+💡 **Need a new package?**: Go ahead! Please adhere to our [conventions](https://www.notion.so/muteskin/Code-conventions-d3c8aa709eb5458a8d128eb9a5ae321b).
 
 🔧 **See room for improvement?**
   - Make a new branch
