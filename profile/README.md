@@ -6,10 +6,12 @@ Hello Team! 👋
 
 📄 **Read Documentation**: Familiarise yourself with the workings of each tool in the readme's. 
 
-🛠️ **Start Contributing**: See room for improvement or need for a new package?
-- Make a new branch
-- When you are done, make a pull request with a clear description of the changes
-- The repository owner will merge your changes into the `main` branch
+💡 **Need a new package?**: Go ahead! Please adhere to our conventions, see below.
+
+🔧 **See room for improvement?**
+  - Make a new branch
+  - When you are done, make a pull request with a clear description of the changes
+  - The repository owner will merge your changes into the `main` branch
 
 ## Need Help? 🆘
 
