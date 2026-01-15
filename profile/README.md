@@ -15,6 +15,6 @@ Hello Team! 👋
 
 ---
 
-When contributing to our codebase, please keep in mind our [conventions](https://www.notion.so/muteskin/Code-conventions-d3c8aa709eb5458a8d128eb9a5ae321b).
+When contributing to our codebase, please keep in mind our [conventions](https://www.notion.so/muteskin/Coding-a7a51f236696404ebbdc50f2b597cfa9).
 
 Happy coding! 🧑‍💻
