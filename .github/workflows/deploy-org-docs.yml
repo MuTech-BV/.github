@@ -1,0 +1,79 @@
+name: Deploy Organization Docs
+
+on:
+  schedule:
+    # Runs daily at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Specific repo to deploy (leave empty for all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: MuTech-BV
+
+      - name: Deploy docs for all repos
+        if: ${{ !inputs.repo }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "Fetching organization repositories..."
+
+          # Get all repos in the org
+          repos=$(gh repo list MuTech-BV --json name --limit 200 -q '.[].name')
+
+          for repo in $repos; do
+            echo "Checking $repo..."
+
+            # Check if repo has mkdocs.yml
+            if gh api "repos/MuTech-BV/$repo/contents/mkdocs.yml" --silent 2>/dev/null; then
+              echo "  → Found mkdocs.yml, triggering docs deployment..."
+
+              # Check if ci.yml workflow exists
+              if gh api "repos/MuTech-BV/$repo/contents/.github/workflows/ci.yml" --silent 2>/dev/null; then
+                # Trigger the CI workflow on main branch
+                gh workflow run ci.yml --repo "MuTech-BV/$repo" --ref main || echo "  → Failed to trigger workflow"
+                echo "  → Triggered CI workflow"
+              else
+                echo "  → No ci.yml workflow found, skipping"
+              fi
+            else
+              echo "  → No mkdocs.yml found, skipping"
+            fi
+
+            # Small delay to avoid rate limiting
+            sleep 1
+          done
+
+          echo "Done!"
+
+      - name: Deploy docs for specific repo
+        if: ${{ inputs.repo }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ inputs.repo }}
+        run: |
+          echo "Deploying docs for $REPO..."
+
+          # Check if repo has mkdocs.yml
+          if gh api "repos/MuTech-BV/$REPO/contents/mkdocs.yml" --silent 2>/dev/null; then
+            gh workflow run ci.yml --repo "MuTech-BV/$REPO" --ref main
+            echo "Triggered CI workflow for $REPO"
+          else
+            echo "Error: $REPO does not have mkdocs.yml"
+            exit 1
+          fi
