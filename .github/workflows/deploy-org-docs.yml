@@ -33,6 +33,13 @@ jobs:
         run: |
           echo "Fetching organization repositories..."
 
+          # Initialize counters and result tracking
+          deployed=()
+          skipped_no_docs=()
+          skipped_no_ci=()
+          skipped_no_dispatch=()
+          failed=()
+
           # Get all repos in the org
           repos=$(gh repo list MuTech-BV --json name --limit 200 -q '.[].name')
 
@@ -41,18 +48,30 @@ jobs:
 
             # Check if repo has mkdocs.yml
             if gh api "repos/MuTech-BV/$repo/contents/mkdocs.yml" --silent 2>/dev/null; then
-              echo "  → Found mkdocs.yml, triggering docs deployment..."
+              echo "  → Found mkdocs.yml, checking for CI workflow..."
 
-              # Check if ci.yml workflow exists
-              if gh api "repos/MuTech-BV/$repo/contents/.github/workflows/ci.yml" --silent 2>/dev/null; then
-                # Trigger the CI workflow on main branch
-                gh workflow run ci.yml --repo "MuTech-BV/$repo" --ref main || echo "  → Failed to trigger workflow"
-                echo "  → Triggered CI workflow"
-              else
+              # Check if ci.yml workflow exists and has workflow_dispatch
+              workflow_content=$(gh api "repos/MuTech-BV/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+
+              if [ -z "$workflow_content" ]; then
                 echo "  → No ci.yml workflow found, skipping"
+                skipped_no_ci+=("$repo")
+              elif echo "$workflow_content" | grep -q "workflow_dispatch"; then
+                # Trigger the CI workflow on main branch
+                if gh workflow run ci.yml --repo "MuTech-BV/$repo" --ref main 2>/dev/null; then
+                  echo "  → Triggered CI workflow"
+                  deployed+=("$repo")
+                else
+                  echo "  → Failed to trigger workflow"
+                  failed+=("$repo")
+                fi
+              else
+                echo "  → ci.yml exists but has no workflow_dispatch trigger, skipping"
+                skipped_no_dispatch+=("$repo")
               fi
             else
               echo "  → No mkdocs.yml found, skipping"
+              skipped_no_docs+=("$repo")
             fi
 
             # Small delay to avoid rate limiting
@@ -60,6 +79,44 @@ jobs:
           done
 
           echo "Done!"
+
+          # Generate job summary
+          {
+            echo "# 📚 Docs Deployment Summary"
+            echo ""
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| ✅ Deployed | ${#deployed[@]} |"
+            echo "| ⏭️ No mkdocs.yml | ${#skipped_no_docs[@]} |"
+            echo "| ⏭️ No ci.yml | ${#skipped_no_ci[@]} |"
+            echo "| ⏭️ No workflow_dispatch | ${#skipped_no_dispatch[@]} |"
+            echo "| ❌ Failed | ${#failed[@]} |"
+            echo ""
+
+            if [ ${#deployed[@]} -gt 0 ]; then
+              echo "## ✅ Deployed"
+              for r in "${deployed[@]}"; do echo "- $r"; done
+              echo ""
+            fi
+
+            if [ ${#skipped_no_dispatch[@]} -gt 0 ]; then
+              echo "## ⏭️ Skipped (no workflow_dispatch trigger)"
+              for r in "${skipped_no_dispatch[@]}"; do echo "- $r"; done
+              echo ""
+            fi
+
+            if [ ${#skipped_no_ci[@]} -gt 0 ]; then
+              echo "## ⏭️ Skipped (no ci.yml)"
+              for r in "${skipped_no_ci[@]}"; do echo "- $r"; done
+              echo ""
+            fi
+
+            if [ ${#failed[@]} -gt 0 ]; then
+              echo "## ❌ Failed"
+              for r in "${failed[@]}"; do echo "- $r"; done
+              echo ""
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy docs for specific repo
         if: ${{ inputs.repo }}
@@ -70,10 +127,30 @@ jobs:
           echo "Deploying docs for $REPO..."
 
           # Check if repo has mkdocs.yml
-          if gh api "repos/MuTech-BV/$REPO/contents/mkdocs.yml" --silent 2>/dev/null; then
-            gh workflow run ci.yml --repo "MuTech-BV/$REPO" --ref main
-            echo "Triggered CI workflow for $REPO"
-          else
+          if ! gh api "repos/MuTech-BV/$REPO/contents/mkdocs.yml" --silent 2>/dev/null; then
+            echo "# ❌ Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPO does not have mkdocs.yml" >> "$GITHUB_STEP_SUMMARY"
             echo "Error: $REPO does not have mkdocs.yml"
             exit 1
           fi
+
+          # Check if ci.yml workflow exists and has workflow_dispatch
+          workflow_content=$(gh api "repos/MuTech-BV/$REPO/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+
+          if [ -z "$workflow_content" ]; then
+            echo "# ❌ Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPO does not have ci.yml workflow" >> "$GITHUB_STEP_SUMMARY"
+            echo "Error: $REPO does not have ci.yml workflow"
+            exit 1
+          elif ! echo "$workflow_content" | grep -q "workflow_dispatch"; then
+            echo "# ❌ Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPO ci.yml has no workflow_dispatch trigger" >> "$GITHUB_STEP_SUMMARY"
+            echo "Error: $REPO ci.yml has no workflow_dispatch trigger"
+            exit 1
+          fi
+
+          gh workflow run ci.yml --repo "MuTech-BV/$REPO" --ref main
+          echo "Triggered CI workflow for $REPO"
+
+          echo "# ✅ Deployment Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "Triggered docs deployment for **$REPO**" >> "$GITHUB_STEP_SUMMARY"
