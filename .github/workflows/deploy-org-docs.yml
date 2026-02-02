@@ -41,15 +41,22 @@ jobs:
 
             # Check if repo has mkdocs.yml
             if gh api "repos/MuTech-BV/$repo/contents/mkdocs.yml" --silent 2>/dev/null; then
-              echo "  → Found mkdocs.yml, triggering docs deployment..."
+              echo "  → Found mkdocs.yml, checking for CI workflow..."
 
-              # Check if ci.yml workflow exists
-              if gh api "repos/MuTech-BV/$repo/contents/.github/workflows/ci.yml" --silent 2>/dev/null; then
-                # Trigger the CI workflow on main branch
-                gh workflow run ci.yml --repo "MuTech-BV/$repo" --ref main || echo "  → Failed to trigger workflow"
-                echo "  → Triggered CI workflow"
-              else
+              # Check if ci.yml workflow exists and has workflow_dispatch
+              workflow_content=$(gh api "repos/MuTech-BV/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+
+              if [ -z "$workflow_content" ]; then
                 echo "  → No ci.yml workflow found, skipping"
+              elif echo "$workflow_content" | grep -q "workflow_dispatch"; then
+                # Trigger the CI workflow on main branch
+                if gh workflow run ci.yml --repo "MuTech-BV/$repo" --ref main 2>/dev/null; then
+                  echo "  → Triggered CI workflow"
+                else
+                  echo "  → Failed to trigger workflow"
+                fi
+              else
+                echo "  → ci.yml exists but has no workflow_dispatch trigger, skipping"
               fi
             else
               echo "  → No mkdocs.yml found, skipping"
@@ -70,10 +77,21 @@ jobs:
           echo "Deploying docs for $REPO..."
 
           # Check if repo has mkdocs.yml
-          if gh api "repos/MuTech-BV/$REPO/contents/mkdocs.yml" --silent 2>/dev/null; then
-            gh workflow run ci.yml --repo "MuTech-BV/$REPO" --ref main
-            echo "Triggered CI workflow for $REPO"
-          else
+          if ! gh api "repos/MuTech-BV/$REPO/contents/mkdocs.yml" --silent 2>/dev/null; then
             echo "Error: $REPO does not have mkdocs.yml"
             exit 1
           fi
+
+          # Check if ci.yml workflow exists and has workflow_dispatch
+          workflow_content=$(gh api "repos/MuTech-BV/$REPO/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+
+          if [ -z "$workflow_content" ]; then
+            echo "Error: $REPO does not have ci.yml workflow"
+            exit 1
+          elif ! echo "$workflow_content" | grep -q "workflow_dispatch"; then
+            echo "Error: $REPO ci.yml has no workflow_dispatch trigger"
+            exit 1
+          fi
+
+          gh workflow run ci.yml --repo "MuTech-BV/$REPO" --ref main
+          echo "Triggered CI workflow for $REPO"
