@@ -30,7 +30,8 @@ jobs:
             --owner "$ORG" \
             --format json \
             --limit 5000 \
-            --jq '.items[].content.url' 2>/dev/null || echo "")
+            --jq '[.items[].content.url // empty] | .[]')
+          echo "  Found $(echo "$EXISTING" | grep -c .) existing items."
 
           ADDED=0
 
