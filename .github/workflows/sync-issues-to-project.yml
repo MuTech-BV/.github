@@ -1,0 +1,65 @@
+name: Sync all org issues and PRs to project
+
+on:
+  schedule:
+    - cron: '*/30 6-19 * * *'
+  workflow_dispatch:
+
+env:
+  ORG: MuTech-BV
+  PROJECT_NUMBER: "1"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync open issues and PRs to project
+        env:
+          GH_TOKEN: ${{ secrets.ISSUE_DASHBOARD }}
+        run: |
+          echo "Fetching current project items..."
+          EXISTING=$(gh project item-list $PROJECT_NUMBER \
+            --owner "$ORG" \
+            --format json \
+            --limit 5000 \
+            --jq '.items[].content.url' 2>/dev/null || echo "")
+
+          ADDED=0
+
+          echo "Searching open issues..."
+          ISSUES=$(gh search issues \
+            --owner "$ORG" \
+            --state open \
+            --json url \
+            -q '.[].url' \
+            --limit 1000)
+
+          for url in $ISSUES; do
+            if echo "$EXISTING" | grep -qF "$url"; then
+              continue
+            fi
+            echo "Adding issue: $url"
+            gh project item-add "$PROJECT_NUMBER" \
+              --owner "$ORG" \
+              --url "$url" 2>/dev/null && ADDED=$((ADDED + 1)) || echo "  Failed: $url"
+          done
+
+          echo "Searching open PRs..."
+          PRS=$(gh search prs \
+            --owner "$ORG" \
+            --state open \
+            --json url \
+            -q '.[].url' \
+            --limit 1000)
+
+          for url in $PRS; do
+            if echo "$EXISTING" | grep -qF "$url"; then
+              continue
+            fi
+            echo "Adding PR: $url"
+            gh project item-add "$PROJECT_NUMBER" \
+              --owner "$ORG" \
+              --url "$url" 2>/dev/null && ADDED=$((ADDED + 1)) || echo "  Failed: $url"
+          done
+
+          echo "Sync complete. Added $ADDED items."
