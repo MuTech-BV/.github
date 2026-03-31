@@ -25,16 +25,6 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          echo "Fetching current project items..."
-          EXISTING=$(gh project item-list $PROJECT_NUMBER \
-            --owner "$ORG" \
-            --format json \
-            --limit 5000 \
-            --jq '[.items[].content.url // empty] | .[]')
-          echo "  Found $(echo "$EXISTING" | grep -c .) existing items."
-
-          ADDED=0
-
           echo "Searching open issues..."
           ISSUES=$(gh search issues \
             --owner "$ORG" \
@@ -42,16 +32,6 @@ jobs:
             --json url \
             -q '.[].url' \
             --limit 1000)
-
-          for url in $ISSUES; do
-            if echo "$EXISTING" | grep -qF "$url"; then
-              continue
-            fi
-            echo "Adding issue: $url"
-            gh project item-add "$PROJECT_NUMBER" \
-              --owner "$ORG" \
-              --url "$url" 2>/dev/null && ADDED=$((ADDED + 1)) || echo "  Failed: $url"
-          done
 
           echo "Searching open PRs..."
           PRS=$(gh search prs \
@@ -61,14 +41,13 @@ jobs:
             -q '.[].url' \
             --limit 1000)
 
-          for url in $PRS; do
-            if echo "$EXISTING" | grep -qF "$url"; then
-              continue
-            fi
-            echo "Adding PR: $url"
+          TOTAL=$(echo "$ISSUES $PRS" | wc -w | tr -d ' ')
+          echo "Found $TOTAL open items. Ensuring all are on the project..."
+
+          for url in $ISSUES $PRS; do
             gh project item-add "$PROJECT_NUMBER" \
               --owner "$ORG" \
-              --url "$url" 2>/dev/null && ADDED=$((ADDED + 1)) || echo "  Failed: $url"
+              --url "$url" > /dev/null 2>&1 || echo "Failed: $url"
           done
 
-          echo "Sync complete. Added $ADDED items."
+          echo "Sync complete. Processed $TOTAL items."
