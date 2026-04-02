@@ -55,6 +55,13 @@ jobs:
               }
             ")
 
+            # Debug: show raw response on first page
+            if [ "$PAGE" -eq 1 ]; then
+              echo "DEBUG: Raw GraphQL response (first 500 chars):"
+              echo "$RESULT" | head -c 500
+              echo ""
+            fi
+
             URLS=$(echo "$RESULT" | jq -r '
               .data.organization.projectV2.items.nodes[]
               | .content.url // empty
