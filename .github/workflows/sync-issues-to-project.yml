@@ -25,6 +25,51 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          # Step 1: Fetch all project item URLs via GraphQL (paginated)
+          EXISTING=""
+          CURSOR=""
+          PAGE=0
+          while true; do
+            PAGE=$((PAGE + 1))
+            if [ -z "$CURSOR" ]; then
+              AFTER="null"
+            else
+              AFTER="\"$CURSOR\""
+            fi
+
+            RESULT=$(gh api graphql -f query="
+              query {
+                organization(login: \"$ORG\") {
+                  projectV2(number: $PROJECT_NUMBER) {
+                    items(first: 100, after: $AFTER) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes {
+                        content {
+                          ... on Issue { url }
+                          ... on PullRequest { url }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ")
+
+            URLS=$(echo "$RESULT" | jq -r '
+              .data.organization.projectV2.items.nodes[]
+              | .content.url // empty
+            ')
+            EXISTING="${EXISTING}${URLS}"$'\n'
+
+            HAS_NEXT=$(echo "$RESULT" | jq -r '.data.organization.projectV2.items.pageInfo.hasNextPage')
+            [ "$HAS_NEXT" = "true" ] || break
+            CURSOR=$(echo "$RESULT" | jq -r '.data.organization.projectV2.items.pageInfo.endCursor')
+          done
+
+          EXISTING_COUNT=$(echo "$EXISTING" | grep -c . || true)
+          echo "Fetched $EXISTING_COUNT project items in $PAGE page(s)."
+
+          # Step 2: Search open issues + PRs
           echo "Searching open issues..."
           ISSUES=$(gh search issues \
             --owner "$ORG" \
@@ -42,12 +87,27 @@ jobs:
             --limit 1000)
 
           TOTAL=$(echo "$ISSUES $PRS" | wc -w | tr -d ' ')
-          echo "Found $TOTAL open items. Ensuring all are on the project..."
+          echo "Found $TOTAL open items."
 
+          # Step 3: Sanity check — if project query returned 0 items, don't blindly re-add everything
+          if [ "$EXISTING_COUNT" -eq 0 ] && [ "$TOTAL" -gt 50 ]; then
+            echo "::error::Project item query returned 0 items but found $TOTAL open items. Aborting to avoid duplicate adds."
+            exit 1
+          fi
+
+          # Step 4: Diff and add missing
+          ADDED=0
+          SKIPPED=0
           for url in $ISSUES $PRS; do
+            if echo "$EXISTING" | grep -qF "$url"; then
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+            echo "Adding: $url"
             gh project item-add "$PROJECT_NUMBER" \
               --owner "$ORG" \
-              --url "$url" > /dev/null 2>&1 || echo "Failed: $url"
+              --url "$url" > /dev/null 2>&1 \
+              && ADDED=$((ADDED + 1)) || echo "  Failed: $url"
           done
 
-          echo "Sync complete. Processed $TOTAL items."
+          echo "Sync complete. Skipped $SKIPPED existing, added $ADDED new items."
