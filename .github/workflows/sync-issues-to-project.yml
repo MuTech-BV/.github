@@ -42,12 +42,11 @@ jobs:
             --limit 1000)
 
           TOTAL=$(echo "$ISSUES $PRS" | wc -w | tr -d ' ')
-          echo "Found $TOTAL open items. Ensuring all are on the project..."
+          echo "Found $TOTAL open items. Syncing to project (20 parallel)..."
 
-          for url in $ISSUES $PRS; do
-            gh project item-add "$PROJECT_NUMBER" \
-              --owner "$ORG" \
-              --url "$url" > /dev/null 2>&1 || echo "Failed: $url"
-          done
+          echo "$ISSUES" "$PRS" | tr ' ' '\n' | grep . | \
+            xargs -P 20 -I {} sh -c '
+              gh project item-add "$1" --owner "$2" --url "$3" > /dev/null 2>&1 || echo "Failed: $3"
+            ' _ "$PROJECT_NUMBER" "$ORG" {}
 
           echo "Sync complete. Processed $TOTAL items."
