@@ -1,0 +1,121 @@
+name: Close issues by project status
+
+on:
+  schedule:
+    - cron: '*/30 6-19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ORG: MuTech-BV
+  PROJECT_NUMBER: "1"
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ISSUE_DASHBOARD_APP_ID }}
+          private-key: ${{ secrets.ISSUE_DASHBOARD_APP_KEY }}
+          owner: MuTech-BV
+
+      - name: Close issues whose project Status is Done/Obsolete
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          matches_file=$(mktemp)
+          cursor=""
+
+          while :; do
+            if [ -z "$cursor" ]; then
+              page_arg='first: 100'
+            else
+              page_arg="first: 100, after: \"$cursor\""
+            fi
+
+            query=$(cat <<GQL
+          query {
+            organization(login: "$ORG") {
+              projectV2(number: $PROJECT_NUMBER) {
+                items($page_arg) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes {
+                    content {
+                      __typename
+                      ... on Issue { state url }
+                    }
+                    fieldValues(first: 20) {
+                      nodes {
+                        ... on ProjectV2ItemFieldSingleSelectValue {
+                          name
+                          field { ... on ProjectV2SingleSelectField { name } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          GQL
+          )
+
+            resp=$(gh api graphql -f query="$query")
+
+            echo "$resp" | jq -r '
+              .data.organization.projectV2.items.nodes[]
+              | select(.content.__typename == "Issue")
+              | select(.content.state == "OPEN")
+              | . as $item
+              | [.fieldValues.nodes[] | select(.field.name == "Status") | .name] as $s
+              | ($s[0] // "") as $status
+              | select($status == "Done" or $status == "Done (Closed/Archived)" or $status == "Obsolete")
+              | [$item.content.url, $status] | @tsv
+            ' >> "$matches_file"
+
+            has_next=$(echo "$resp" | jq -r '.data.organization.projectV2.items.pageInfo.hasNextPage')
+            cursor=$(echo "$resp" | jq -r '.data.organization.projectV2.items.pageInfo.endCursor')
+
+            [ "$has_next" = "true" ] || break
+          done
+
+          closed_completed=0
+          closed_not_planned=0
+          failed=0
+
+          while IFS=$'\t' read -r url status; do
+            [ -z "$url" ] && continue
+            case "$status" in
+              "Obsolete") reason="not planned" ;;
+              *)          reason="completed" ;;
+            esac
+            echo "Closing $url (status=$status, reason=$reason)"
+            if gh issue close "$url" --reason "$reason"; then
+              if [ "$reason" = "not planned" ]; then
+                closed_not_planned=$((closed_not_planned + 1))
+              else
+                closed_completed=$((closed_completed + 1))
+              fi
+            else
+              failed=$((failed + 1))
+            fi
+          done < "$matches_file"
+
+          {
+            echo "# Project status → issue close summary"
+            echo ""
+            echo "| Reason | Count |"
+            echo "|--------|-------|"
+            echo "| completed   | $closed_completed |"
+            echo "| not planned | $closed_not_planned |"
+            echo "| failed      | $failed |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          rm -f "$matches_file"
